@@ -78,6 +78,7 @@ struct eyebrow_struct{
 };
 
 struct mouth_struct{
+	double mouth_width;
 	double mouth_height;
 };
 
@@ -127,6 +128,7 @@ double distanceLineToPoint(vector<Point2i> line, Point2i point);
 double getHeightEye(vector<Point2i> eyeLandmarks);
 double getHeightEyebrow(vector<Point2i> eyebrowLandmarks);
 double getHeightMouth(vector<Point2i> mouthLandmarks);
+double getWidthMouth(vector<Point2i> mouthLandmarks);
 double getHeightEyebrow2Eye(vector<Point2i> eyeLandmarks, vector<Point2i> eyebrowLandmarks);
 
 EEmotion getEmotion(face_struct actualFace);
@@ -358,7 +360,12 @@ int main(int argc, char **argv)
 			Mat captured_image;
 			video_capture >> captured_image;
 		}
-		else if (current_file.size() > 0)
+		else{
+			INFO_STREAM("Attempting to capture from device: " << device+1);
+			video_capture.open(device+1);
+		}
+		
+		if (!video_capture.isOpened() && current_file.size() > 0)
 		{
 			INFO_STREAM("Attempting to read from file: " << current_file);
 			video_capture = VideoCapture(current_file);
@@ -988,7 +995,7 @@ eyebrow_struct	getFeatureEyebrow(vector<Point2i> eyebrowLandmarks, vector<Point2
 }
 
 mouth_struct	getFeatureMouth(vector<Point2i> mouthLandmarks){
-	mouth_struct mouthStruct = { getHeightMouth(mouthLandmarks) };
+	mouth_struct mouthStruct = { getWidthMouth(mouthLandmarks), getHeightMouth(mouthLandmarks) };
 	return mouthStruct;
 }
 
@@ -1047,16 +1054,12 @@ double getHeightEyebrow2Eye(vector<Point2i> eyeLandmarks, vector<Point2i> eyebro
 	return cv::norm(eyebrowLandmarks[2] - topEyelid);
 }
 
+double getWidthMouth(vector<Point2i> mouthLandmarks){
+	return cv::norm(mouthLandmarks[9] - mouthLandmarks[3]);
+}
+
 double getHeightMouth(vector<Point2i> mouthLandmarks){
-
-	//Finds the distance from the line of the edges of the mouth (48 & 54, or in the case of the extracted values, 0 and 6)
-	//and the lowest part of the mouth (57, or 9).
-
-	vector<Point2i> line;
-	line.push_back(mouthLandmarks[0]);
-	line.push_back(mouthLandmarks[6]);
-
-	return distanceLineToPoint(line, mouthLandmarks[9]);
+	return cv::norm(mouthLandmarks[6] - mouthLandmarks[0]);
 }
 
 EEmotion getEmotion(face_struct actualFace){
@@ -1104,7 +1107,7 @@ double getEyebrowDistance(eyebrow_struct actualEyebrow, eyebrow_struct baseEyebr
 
 double getMouthDistance(mouth_struct actualMouth, mouth_struct baseMouth)
 {
-	return abs(actualMouth.mouth_height - baseMouth.mouth_height);
+	return abs(actualMouth.mouth_height - baseMouth.mouth_height) + abs(actualMouth.mouth_width - baseMouth.mouth_width);
 }
 
 vector<double> featureSnapshot(face_struct currentFace){
@@ -1141,6 +1144,7 @@ void populateFaces(){
 			double leftEyebrow2eyeHeight;
 			double rightEyebrow2eyeHeight;
 			double mouthHeight;
+			double mouthWidth;
 			EEmotion emotion = UNKNOWN;
 
 			stringstream  lineStream(input);
@@ -1173,6 +1177,9 @@ void populateFaces(){
 			rightEyebrow2eyeHeight = stod(cell);
 			
 			std::getline(lineStream, cell, ',');
+			mouthWidth = stod(cell);
+
+			std::getline(lineStream, cell, ',');
 			mouthHeight = stod(cell);
 
 			face_struct modelFace =
@@ -1181,7 +1188,7 @@ void populateFaces(){
 				eye_struct{ rightEyeHeight },
 				eyebrow_struct{ leftEyebrowHeight, leftEyebrow2eyeHeight },
 				eyebrow_struct{ rightEyebrowHeight, rightEyebrow2eyeHeight },
-				mouth_struct{ mouthHeight },
+				mouth_struct{ mouthWidth, mouthHeight },
 				emotion
 			};
 
@@ -1189,8 +1196,8 @@ void populateFaces(){
 		}
 		catch (...){
 			facePopulation.clear();
-			cout << "Error During the Expression Learning Phase. Please Verify the Base and Restart the Algorithm!\n" <<
-				"This Session Will Be Started With No Previous Training, Please Calibrate the Algorithm Pressing I!" << endl;
+			INFO_STREAM("Error During the Expression Learning Phase. Please Verify the Base and Restart the Algorithm!\n" <<
+				"This Session Will Be Started With No Previous Training, Please Calibrate the Algorithm Pressing I!");
 			break;
 		}
 	}
@@ -1200,7 +1207,7 @@ void exportFaces(){
 	ofstream facesDatabase;
 	facesDatabase.open("learningFaces.csv");
 
-	facesDatabase << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,Left Eyebrow to Eye Height,Right Eyebrow to Eye Height,MouthHeight,\n";
+	facesDatabase << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,Left Eyebrow to Eye Height,Right Eyebrow to Eye Height,Mouth Width,Mouth Height,\n";
 	for (int i = 0; i < facePopulation.size(); i++)
 	{
 		string output =
@@ -1211,6 +1218,7 @@ void exportFaces(){
 			to_string(facePopulation[i].rightEyebrow.eyebrow_height) + "," +
 			to_string(facePopulation[i].leftEyebrow.eyebrow2eye_height) + "," +
 			to_string(facePopulation[i].rightEyebrow.eyebrow2eye_height) + "," +
+			to_string(facePopulation[i].mouth.mouth_width) + "," +
 			to_string(facePopulation[i].mouth.mouth_height) + ",\n";
 
 		facesDatabase << output;
