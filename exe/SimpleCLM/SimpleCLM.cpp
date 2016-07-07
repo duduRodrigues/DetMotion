@@ -672,7 +672,7 @@ void showImageWithLandMarks(Mat capturedImage, vector<Point2i> landMarks){
 	int thickness_2 = (int)std::ceil(1.5* ((double)capturedImage.cols) / 640.0);
 
 	Mat img = capturedImage.clone();
-
+	 
 	Point2i featurePoint;
 	//for (int i = 0; i < landMarks.size(); i++){
 	//	featurePoint.x = landMarks.at(i).x;
