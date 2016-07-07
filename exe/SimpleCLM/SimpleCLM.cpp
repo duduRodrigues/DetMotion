@@ -639,7 +639,7 @@ int main(int argc, char **argv)
 					string sessionName = getSessionName();
 					captureStart = clock();
 					outputCSV.open(sessionName);
-					outputCSV << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,LeftEyebrow to Eye Distance,RightEyebrow to Eye Distance,MouthWidth,MouthHeight,Timestamp\n";
+					outputCSV << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,LeftEyebrow to Eye Distance,RightEyebrow to Eye Distance,Mouth Width,Mouth Height,Timestamp\n";
 				}
 			}
 
