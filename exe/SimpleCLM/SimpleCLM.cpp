@@ -54,18 +54,20 @@
 #include <sstream>
 #include <ctime> // finding time
 #include <chrono> // time
+#include <algorithm> //min
 
 #include <opencv2/videoio/videoio.hpp>  // Video write
 #include <opencv2/videoio/videoio_c.h>  // Video write
 
 enum EEmotion{
-	UNKNOWN = 0,
-	NEUTRAL = 1,
-	HAPPY = 2,
-	SAD = 3,
-	ANGRY = 4,
-	SURPRISED = 5,
-	SCARED = 6
+	NEUTRAL,
+	HAPPY,
+	SAD,
+	ANGRY,
+	SCARED,
+	SURPRISED,
+	DOUBT,
+	UNKNOWN
 };
 
 struct eye_struct{
@@ -90,6 +92,9 @@ struct face_struct{
 
 #define PI 3.1415926535897
 #define CALCULATE_POSE false
+#define KNN 0 //1 - Usando KNN, 0 - Usando matriz dissimilaridade
+int neighbours = 10;
+
 vector<Point2i> actualLandmarks;
 
 #define INFO_STREAM( stream ) \
@@ -150,7 +155,7 @@ void inputFace(face_struct currentFace, EEmotion emotion);
 // s -> Next emotion
 bool inputMode = false;
 face_struct newFace = face_struct{};
-EEmotion emotionList[6] = { HAPPY, SAD, ANGRY, SURPRISED, SCARED, NEUTRAL };
+vector<EEmotion> emotionVec;
 int choiceEmotion = 0;
 
 
@@ -173,13 +178,24 @@ map<EEmotion, string> emotionMap;
 
 void init(){
 	emotionMap[EEmotion::UNKNOWN] = "Unknown";
+	emotionMap[EEmotion::NEUTRAL] = "Neutral";
 	emotionMap[EEmotion::HAPPY] = "Happy";
 	emotionMap[EEmotion::SAD] = "Sad";
 	emotionMap[EEmotion::ANGRY] = "Angry";
-	emotionMap[EEmotion::SURPRISED] = "Surprised";
 	emotionMap[EEmotion::SCARED] = "Scared";
-	emotionMap[EEmotion::NEUTRAL] = "Neutral";
+	emotionMap[EEmotion::SURPRISED] = "Surprised";
+	emotionMap[EEmotion::DOUBT] = "Doubt";
 
+	emotionVec.clear();
+
+	emotionVec.push_back(EEmotion::NEUTRAL);
+	emotionVec.push_back(EEmotion::HAPPY);
+	emotionVec.push_back(EEmotion::SAD);
+	emotionVec.push_back(EEmotion::ANGRY);
+	emotionVec.push_back(EEmotion::SCARED);
+	emotionVec.push_back(EEmotion::SURPRISED);
+	emotionVec.push_back(EEmotion::DOUBT);
+	
 	//Populate Faces
 	populateFaces();
 }
@@ -263,18 +279,18 @@ void visualise_tracking(Mat& captured_image, Mat_<float>& depth_image, const CLM
 	fpsSt += fpsC;
 	cv::putText(captured_image, fpsSt, cv::Point(10, 20), CV_FONT_HERSHEY_SIMPLEX, 0.5, CV_RGB(255, 0, 0));
 
-	if (!clm_parameters.quiet_mode)
-	{
-		namedWindow("tracking_result", 1);
-		imshow("tracking_result", captured_image);
-
-		if (!depth_image.empty())
-		{
-			// Division needed for visualisation purposes
-			imshow("depth", depth_image / 2000.0);
-		}
-
-	}
+	//if (!clm_parameters.quiet_mode)
+	//{
+	//	namedWindow("tracking_result", 1);
+	//	imshow("tracking_result", captured_image);
+	//
+	//	if (!depth_image.empty())
+	//	{
+	//		// Division needed for visualisation purposes
+	//		imshow("depth", depth_image / 2000.0);
+	//	}
+	//
+	//}
 }
 
 int main(int argc, char **argv)
@@ -567,6 +583,8 @@ int main(int argc, char **argv)
 
 			video_capture >> captured_image;
 
+			cv::flip(captured_image, captured_image, 1);
+
 			// detect key presses
 			char character_press = cv::waitKey(1);
 
@@ -582,21 +600,15 @@ int main(int argc, char **argv)
 			}
 			else if (character_press == 'i')
 			{
-				if (inputMode)
-				{
-					inputMode = false;
-				}
-				else{
-					inputMode = true;
-				}
+				inputMode = !inputMode;
 			}
 			else if (character_press == 'a' && inputMode)
 			{
-				inputFace(newFace, emotionList[choiceEmotion]);
+				inputFace(newFace, emotionVec.at(choiceEmotion));
 			}
 			else if (character_press == 's' && inputMode)
 			{
-				if (choiceEmotion != 5)
+				if (choiceEmotion < emotionVec.size()-1)
 				{
 					choiceEmotion++;
 				}
@@ -620,7 +632,7 @@ int main(int argc, char **argv)
 					string sessionName = getSessionName();
 					captureStart = clock();
 					outputCSV.open(sessionName);
-					outputCSV << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,MouthHeight,Timestamp\n";
+					outputCSV << "Expression,Left Eye Height,Right Eye Height,Left Eyebrow Height,Right Eyebrow Height,LeftEyebrow to Eye Distance,RightEyebrow to Eye Distance,MouthHeight,Timestamp\n";
 				}
 			}
 
@@ -756,24 +768,52 @@ void showImageWithLandMarks(Mat capturedImage, vector<Point2i> landMarks){
 			distanceGambiarra[emotionMap[EEmotion::NEUTRAL]] +
 			distanceGambiarra[emotionMap[EEmotion::UNKNOWN]];
 
+			#if KNN
+				cv::putText(img, "Happy:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::HAPPY]] * 100 / totalDistance)) + "%", Point2i(20, initY + 6 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));			 
+				cv::putText(img, "Sad:       " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SAD]] * 100 / totalDistance)) + "%", Point2i(20, initY + 7 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));			 
+				cv::putText(img, "Surprised: " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SURPRISED]] * 100 / totalDistance)) + "%", Point2i(20, initY + 8 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));		 
+				cv::putText(img, "Angry:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::ANGRY]] * 100 / totalDistance)) + "%", Point2i(20, initY + 9 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));			 
+				cv::putText(img, "Scared:    " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SCARED]] * 100 / totalDistance)) + "%", Point2i(20, initY + 10 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));		 
+				cv::putText(img, "Neutral:   " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::NEUTRAL]] * 100 / totalDistance)) + "%", Point2i(20, initY + 11 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));		 
 
-		cv::putText(img, "Happy:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::HAPPY]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 6 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		cv::putText(img, "Sad:       " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SAD]]		 *100/totalDistance)) + "%"	, Point2i(20, initY + 7 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		cv::putText(img, "Surprised: " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SURPRISED]] *100/totalDistance)) + "%"	, Point2i(20, initY + 8 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		cv::putText(img, "Angry:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::ANGRY]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 9 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		cv::putText(img, "Scared:    " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SCARED]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 10 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		cv::putText(img, "Neutral:   " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::NEUTRAL]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 11 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
-		//cv::putText(img, "Unknown:   " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::UNKNOWN]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 12 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Happy:     " + to_string(roundf((double)distanceGambiarra[emotionMap[EEmotion::HAPPY]])) + "%", Point2i(20, initY + 6 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Sad:       " + to_string(roundf((double)distanceGambiarra[emotionMap[EEmotion::SAD]])) + "%", Point2i(20, initY + 7 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Surprised: " + to_string(roundf(distanceGambiarra[emotionMap[EEmotion::SURPRISED]])) + "%", Point2i(20, initY + 8 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Angry:     " + to_string(roundf(distanceGambiarra[emotionMap[EEmotion::ANGRY]])) + "%", Point2i(20, initY + 9 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Scared:    " + to_string(roundf(distanceGambiarra[emotionMap[EEmotion::SCARED]])) + "%", Point2i(20, initY + 10 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Neutral:   " + to_string(roundf(distanceGambiarra[emotionMap[EEmotion::NEUTRAL]])) + "%", Point2i(20, initY + 11 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+			#else
+				cv::putText(img, "Happy:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::HAPPY]] * 100 / totalDistance)) + "%", Point2i(20, initY + 6 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Sad:       " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SAD]]		 *100/totalDistance)) + "%"	, Point2i(20, initY + 7 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Surprised: " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SURPRISED]] *100/totalDistance)) + "%"	, Point2i(20, initY + 8 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Angry:     " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::ANGRY]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 9 * dist),  CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Scared:    " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::SCARED]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 10 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				cv::putText(img, "Neutral:   " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::NEUTRAL]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 11 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+				//cv::putText(img, "Unknown:   " + to_string(100 - (distanceGambiarra[emotionMap[EEmotion::UNKNOWN]]	 *100/totalDistance)) + "%"	, Point2i(20, initY + 12 * dist), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255));
+			#endif
+
 
 		cv::putText(img, "EMOTION: " + emotionMap[actualFace.emotion], Point2i(300, initY), CV_FONT_NORMAL, 0.8, Scalar(0, 0, 255), 1.5f);
 
 		if (inputMode)
 		{
+			string emotionSelectionList = "";
+
+			for (int i = 0; i <= 6; i++){
+				emotionSelectionList.append("|");
+				emotionSelectionList.append(to_string(i));
+				emotionSelectionList.append("-");
+				emotionSelectionList.append(emotionMap[emotionVec.at(i)]);
+			}
+
 			newFace = actualFace;
-			cv::putText(img, "INPUT MODE", Point2i(20, 300), CV_FONT_NORMAL, 0.6, Scalar(255, 0, 255));
-			cv::putText(img, "Inputing Face as emotion: " + to_string(choiceEmotion), Point2i(20, 320), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
-			cv::putText(img, "0-HAPPY|1-SAD|2-ANGRY|3-SURPRISED|4-SCARED|5-NEUTRAL", Point2i(20, 340), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
-			cv::putText(img, "a - Adds current face. s - Cycle through emotions d - Export faces", Point2i(20, 360), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
+
+			int lineBeginY = 340;
+			int breaklineSpace = 20;
+			cv::putText(img, "INPUT MODE", Point2i(20, (lineBeginY + 0*breaklineSpace)), CV_FONT_NORMAL, 0.6, Scalar(255, 0, 255));
+			cv::putText(img, "Inputing Face as emotion: " + to_string(choiceEmotion), Point2i(20, (lineBeginY + 1*breaklineSpace)), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
+			cv::putText(img, emotionSelectionList, Point2i(20, (lineBeginY + 2*breaklineSpace)), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
+			cv::putText(img, "a - Adds current face. s - Cycle through emotions d - Export faces", Point2i(20, (lineBeginY + 3*breaklineSpace)), CV_FONT_NORMAL, 0.5, Scalar(255, 0, 255));
 		}
 
 		if (captureMode)
@@ -925,7 +965,7 @@ face_struct	getFeatureFace(vector<Point2i> landMarks){
 	eye_struct		leftEyeStruct = getFeatureEye(leftEyeLandmarks);
 	eye_struct		rightEyeStruct = getFeatureEye(rightEyeLandmarks);
 	eyebrow_struct	leftEyebrowStruct = getFeatureEyebrow(leftEyebrowLandmarks, leftEyeLandmarks);
-	eyebrow_struct	rightEyebrowStruct = getFeatureEyebrow(rightEyebrowLandmarks, leftEyeLandmarks);
+	eyebrow_struct	rightEyebrowStruct = getFeatureEyebrow(rightEyebrowLandmarks, rightEyeLandmarks);
 	mouth_struct	mouthStruct = getFeatureMouth(mouthLandmarks);
 
 	face_struct currentFace =
@@ -1060,22 +1100,51 @@ double getHeightMouth(vector<Point2i> mouthLandmarks){
 }
 
 EEmotion getEmotion(face_struct actualFace){
-
-	double low = 99999;
 	EEmotion foundEmotion = UNKNOWN;
-	for (int i = 0; i < facePopulation.size(); i++)
-	{
-		double distance = getDistance(actualFace, facePopulation[i]);
 
-		distanceGambiarra[emotionMap[facePopulation[i].emotion]] = distance;
-
-		if (distance < low)
-		{
-			low = distance;
-			foundEmotion = facePopulation[i].emotion;
+	#if KNN
+		double low = 0;
+		vector<pair<double, EEmotion> > distances;
+		for (int i = 0; i < facePopulation.size(); i++){
+			double distance = getDistance(actualFace, facePopulation[i]);
+		
+			distances.push_back(make_pair(distance, facePopulation[i].emotion));
 		}
-	}
 
+		sort(distances.begin(), distances.end());
+	
+		map<EEmotion, int> neighboursVotes;
+	
+		for (int i = 0; i <= neighbours && i<facePopulation.size(); i++){
+			neighboursVotes[distances[i].second] += 1;
+		}
+	
+		double nrOfVotes = min(neighbours, (int)facePopulation.size());
+	
+		
+		for (map<EEmotion, int>::iterator it = neighboursVotes.begin(); it != neighboursVotes.end(); ++it){
+			nrOfVotes += it->second;
+			distanceGambiarra[emotionMap[it->first]] = (it->second / nrOfVotes) * 100;
+			if (low < it->second){
+				low = it->second;
+				foundEmotion = it->first;
+			}
+		}
+	#else
+		double low = 99999;
+		for (int i = 0; i < facePopulation.size(); i++)
+		{
+			double distance = getDistance(actualFace, facePopulation[i]);
+
+			distanceGambiarra[emotionMap[facePopulation[i].emotion]] = distance;
+
+			if (distance < low)
+			{
+				low = distance;
+				foundEmotion = facePopulation[i].emotion;
+			}
+		}
+	#endif
 	return foundEmotion;
 }
 
@@ -1167,7 +1236,7 @@ void populateFaces(){
 			rightEyebrowHeight = stod(cell);
 			
 			std::getline(lineStream, cell, ',');
-			rightEyebrow2eyeHeight = stod(cell);
+			leftEyebrow2eyeHeight = stod(cell);
 			
 			std::getline(lineStream, cell, ',');
 			rightEyebrow2eyeHeight = stod(cell);
